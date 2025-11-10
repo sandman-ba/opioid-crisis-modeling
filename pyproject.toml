@@ -1,0 +1,15 @@
+[project]
+name = "opioid-research-risk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "geopandas>=1.1.1",
+    "matplotlib>=3.10.7",
+    "polars>=1.35.2",
+    "pyarrow>=22.0.0",
+    "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
+    "xgboost>=3.1.1",
+]

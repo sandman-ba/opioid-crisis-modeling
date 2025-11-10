@@ -1,0 +1,217 @@
+### 11/07/25, EB: Here I am adding plotting utilities functions for maps, feature importance plots, etc.
+
+import os
+import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib import colors, cm
+import seaborn as sns
+
+
+
+def plot_county_metric_maps(
+    df,
+    value_col,
+    out_dir=None,
+    cmap="Reds",
+    center_zero=False,
+    filter_CONUS=True,
+    title_prefix=None,
+    dpi=300,
+):
+    """
+    Plot county-level choropleth maps for any metric (e.g. mortality rate, prediction error, risk score).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain at least ['FIPS', 'Year', value_col].
+    shapefile_path : str
+        Path to county shapefile (e.g., 'Data/cb_2022_us_county_20m.geojson').
+    value_col : str
+        Column to visualize (e.g., 'mortality_rate', 'AbsError_Risk', 'rx_rate').
+    out_dir : str or None
+        Directory to save output images. If None, maps will be shown interactively.
+    cmap : str
+        Matplotlib colormap name (e.g. 'Reds', 'coolwarm', 'bwr', 'viridis').
+    center_zero : bool
+        If True, centers the colorbar at zero (useful for signed quantities like RawError).
+    filter_CONUS : bool
+        Whether to exclude Alaska, Hawaii, and Puerto Rico.
+    title_prefix : str or None
+        Optional prefix for plot titles (e.g., "Model Error", "Risk Score").
+    dpi : int
+        Resolution for saved figures.
+
+    Returns
+    -------
+    None
+    """
+
+    # --- Load shapefile ---
+    print(f"📂 Loading shapefile")
+    gdf = gpd.read_file("data/Processed/2022_County_Shapefile/2022_filtered_shapefile.shp")
+    gdf["FIPS"] = gdf["GEOID"].astype(str).str.zfill(5)
+
+    # --- Optional: filter to CONUS only (exclude AK, HI, PR) ---
+    if filter_CONUS:
+        exclude_prefixes = ("02", "15", "72")  # AK, HI, PR
+        gdf = gdf[~gdf["FIPS"].str.startswith(exclude_prefixes)].copy()
+
+    # --- Ensure data has FIPS + Year + value_col ---
+    df = df.copy()
+    if not isinstance(df, pd.DataFrame):
+        df = df.to_pandas()
+    df["FIPS"] = df["FIPS"].astype(str).str.zfill(5)
+
+    if "Year" not in df.columns:
+        raise ValueError("Input dataframe must contain a 'Year' column.")
+
+    if value_col not in df.columns:
+        raise ValueError(f"Column '{value_col}' not found in dataframe.")
+
+    # --- Merge metric onto shapefile ---
+    merged = gdf.merge(df[["FIPS", "Year", value_col]], on="FIPS", how="left")
+
+    years = sorted(merged["Year"].dropna().unique())
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    # --- Iterate over years ---
+    for yr in years:
+        subset = merged[merged["Year"] == yr].copy()
+
+        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+        title = f"{title_prefix + ' — ' if title_prefix else ''}{value_col} ({yr})"
+        ax.set_title(title, fontsize=14)
+
+        # --- Compute color scaling ---
+        if center_zero:
+            vmax = subset[value_col].abs().max()
+            vmin = -vmax
+        else:
+            vmin, vmax = subset[value_col].min(), subset[value_col].max()
+
+        # --- Plot choropleth ---
+        subset.plot(
+            column=value_col,
+            cmap=cmap,
+            linewidth=0,
+            edgecolor="none",
+            ax=ax,
+            vmin=vmin,
+            vmax=vmax,
+            legend=False,
+        )
+
+        # --- Add state outlines ---
+        if "STATEFP" in subset.columns:
+            states = subset.dissolve(by="STATEFP", as_index=False)
+            states.boundary.plot(ax=ax, color="black", linewidth=0.4, zorder=2)
+
+        # --- Add colorbar ---
+        norm = colors.Normalize(vmin=vmin, vmax=vmax)
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        # use the public API instead of touching the private attribute `_A`.
+        # ScalarMappable.set_array([]) is the supported way to provide an
+        # (empty) array so colorbar can be created without a plotted mappable.
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, orientation="vertical", fraction=0.025, pad=0.02)
+        cbar.ax.tick_params(labelsize=9)
+        cbar.set_label(value_col, fontsize=10)
+
+        ax.axis("off")
+        ax.set_aspect("equal")
+        plt.tight_layout()
+
+        # --- Save or show ---
+        if out_dir:
+            fname = os.path.join(out_dir, f"{value_col}_Map_{yr}.png")
+            plt.savefig(fname, dpi=dpi, bbox_inches="tight")
+            print(f"✅ Saved: {fname}")
+            plt.close()
+        else:
+            plt.show()
+
+def plot_yearly_feature_importances(
+    feature_importance_df,
+    out_dir=None,
+    top_n=None,
+    figsize=(8, 6),
+    dpi=300,
+    palette="viridis",
+    model_name=None
+):
+    """
+    Plot ranked bar charts of average feature importances for each year.
+
+    Parameters
+    ----------
+    feature_importance_df : pd.DataFrame
+        Must contain ['Feature', 'Importance', 'Year', 'Fold'].
+    out_dir : str or None
+        Directory to save PNGs. If None, shows interactively.
+    top_n : int or None
+        If provided, limits to the top N most important features per year.
+    figsize : tuple
+        Figure size for each yearly plot.
+    dpi : int
+        Image resolution.
+    palette : str
+        Seaborn/Matplotlib color palette (e.g. 'viridis', 'crest', 'mako', 'coolwarm').
+    model_name : str or None
+        Optional model name for titles / filenames.
+    """
+
+    # --- Validate dataframe ---
+    required_cols = {"Feature", "Importance", "Year", "Fold"}
+    if not required_cols.issubset(feature_importance_df.columns):
+        raise ValueError(
+            f"DataFrame must contain columns {required_cols}, got {feature_importance_df.columns.tolist()}"
+        )
+
+    if feature_importance_df.empty:
+        print("⚠️ Feature importance dataframe is empty. Skipping plot.")
+        return
+
+    # --- Average over folds ---
+    avg_importance = (
+        feature_importance_df
+        .groupby(["Year", "Feature"], as_index=False)["Importance"]
+        .mean()
+    )
+
+    years = sorted(avg_importance["Year"].unique())
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    for yr in years:
+        df_year = avg_importance[avg_importance["Year"] == yr].copy()
+        df_year = df_year.sort_values("Importance", ascending=False)
+
+        if top_n is not None:
+            df_year = df_year.head(top_n)
+
+        plt.figure(figsize=figsize)
+        sns.barplot(
+            data=df_year,
+            y="Feature",
+            x="Importance",
+            palette=palette,
+            order=df_year["Feature"]
+        )
+
+        model_str = f" ({model_name})" if model_name else ""
+        plt.title(f"Average Feature Importance — {yr}{model_str}", fontsize=14)
+        plt.xlabel("Mean Importance (across folds)", fontsize=12)
+        plt.ylabel("")
+        plt.tight_layout()
+
+        if out_dir:
+            fname = os.path.join(out_dir, f"Feature_Importance_{yr}{'_' + model_name if model_name else ''}.png")
+            plt.savefig(fname, dpi=dpi, bbox_inches="tight")
+            plt.close()
+            print(f"✅ Saved: {fname}")
+        else:
+            plt.show()
