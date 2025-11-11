@@ -149,13 +149,16 @@ def yearly_mortality_prediction_polars(
 
     # --- Optional save ---
     if save_path:
-        Path(save_path).mkdir(parents=True, exist_ok=True)
+        # We create a timestamped filename to avoid overwriting.
         model_name = model.__class__.__name__
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        
+        save_dir = Path(save_path) / model_name.lower() / timestamp
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-        metrics_fp = Path(save_path) / f"{model_name}_metrics_{timestamp}.csv"
-        feats_fp = Path(save_path) / f"{model_name}_feature_importance_{timestamp}.csv"
-        preds_fp = Path(save_path) / f"{model_name}_predictions_{timestamp}.csv"
+        metrics_fp = save_dir / "metrics.csv"
+        feats_fp = save_dir / "feature_importance.csv"
+        preds_fp = save_dir / "predictions.csv"
 
         metrics_df.to_csv(metrics_fp, index=False)
         predictions_df.to_csv(preds_fp, index=False)
@@ -164,5 +167,5 @@ def yearly_mortality_prediction_polars(
 
         print(f"✅ Saved outputs to {save_path}")
 
-    return metrics_df, feature_importance_df, predictions_df, all_errors
+    return metrics_df, feature_importance_df, predictions_df, all_errors, save_dir
 

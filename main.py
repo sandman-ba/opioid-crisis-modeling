@@ -55,16 +55,16 @@ def main():
 
     model = MODEL_REGISTRY[args.model]()  # dynamically pick model
 
-    metrics, feature_importances, predictions, all_errors = (
-        yearly_mortality_prediction_polars(df, model)
+    metrics, feature_importances, predictions, all_errors, save_dir = (
+        yearly_mortality_prediction_polars(df, model, save_path=args.save_dir)
     )
 
     risk_scores = compute_all_risk_scores(predictions)
 
     PLOT_DISPATCH = {
-        "risk": lambda: plot_county_metric_maps(risk_scores, "AbsError_Risk", out_dir=args.save_dir),
-        "features": lambda: plot_yearly_feature_importances(feature_importances, out_dir=args.save_dir),
-        "mortality": lambda: plot_county_metric_maps(df, "mortality_rate", out_dir=args.save_dir),
+        "risk": lambda: plot_county_metric_maps(risk_scores, "AbsError_Risk", save_dir=save_dir),
+        "features": lambda: plot_yearly_feature_importances(feature_importances, save_dir=save_dir),
+        "mortality": lambda: plot_county_metric_maps(df, "mortality_rate", save_dir=save_dir),
     }
 
     if args.plot not in PLOT_DISPATCH:
@@ -73,15 +73,6 @@ def main():
 
     PLOT_DISPATCH[args.plot]()  # run selected plotting function
 
-
-# def main():
-#     args = get_args()
-#     data = CountyDataLoader()
-#     df = data.load()
-#     model = xgb_model
-#     metrics, feature_importances, predictions, all_errors = yearly_mortality_prediction_polars(df, model)
-#     risk_scores = compute_all_risk_scores(predictions)
-#     plot_county_metric_maps(risk_scores, 'AbsError_Risk')
 
 if __name__ == "__main__":
     main()

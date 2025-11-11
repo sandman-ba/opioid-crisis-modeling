@@ -7,13 +7,14 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib import colors, cm
 import seaborn as sns
+from pathlib import Path
 
 
 
 def plot_county_metric_maps(
     df,
     value_col,
-    out_dir=None,
+    save_dir=None,
     cmap="Reds",
     center_zero=False,
     filter_CONUS=True,
@@ -75,8 +76,8 @@ def plot_county_metric_maps(
     merged = gdf.merge(df[["FIPS", "Year", value_col]], on="FIPS", how="left")
 
     years = sorted(merged["Year"].dropna().unique())
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
 
     # --- Iterate over years ---
     for yr in years:
@@ -113,9 +114,6 @@ def plot_county_metric_maps(
         # --- Add colorbar ---
         norm = colors.Normalize(vmin=vmin, vmax=vmax)
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-        # use the public API instead of touching the private attribute `_A`.
-        # ScalarMappable.set_array([]) is the supported way to provide an
-        # (empty) array so colorbar can be created without a plotted mappable.
         sm.set_array([])
         cbar = fig.colorbar(sm, ax=ax, orientation="vertical", fraction=0.025, pad=0.02)
         cbar.ax.tick_params(labelsize=9)
@@ -126,17 +124,19 @@ def plot_county_metric_maps(
         plt.tight_layout()
 
         # --- Save or show ---
-        if out_dir:
-            fname = os.path.join(out_dir, f"{value_col}_Map_{yr}.png")
+        if save_dir:
+            plots_dir = Path(save_dir) / "maps"
+            plots_dir.mkdir(parents=True, exist_ok=True)
+            fname = plots_dir / f"{value_col}_Map_{yr}.png"
             plt.savefig(fname, dpi=dpi, bbox_inches="tight")
-            print(f"✅ Saved: {fname}")
+            print(f"✅ Saved map: {fname}")
             plt.close()
         else:
             plt.show()
 
 def plot_yearly_feature_importances(
     feature_importance_df,
-    out_dir=None,
+    save_dir=None,
     top_n=None,
     figsize=(8, 6),
     dpi=300,
@@ -183,8 +183,8 @@ def plot_yearly_feature_importances(
     )
 
     years = sorted(avg_importance["Year"].unique())
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
 
     for yr in years:
         df_year = avg_importance[avg_importance["Year"] == yr].copy()
@@ -208,8 +208,10 @@ def plot_yearly_feature_importances(
         plt.ylabel("")
         plt.tight_layout()
 
-        if out_dir:
-            fname = os.path.join(out_dir, f"Feature_Importance_{yr}{'_' + model_name if model_name else ''}.png")
+        if save_dir:
+            plots_dir = Path(save_dir) / "feature_importances"
+            plots_dir.mkdir(parents=True, exist_ok=True)
+            fname = plots_dir / f"Feature_Importance_{yr}{'_' + model_name if model_name else ''}.png"
             plt.savefig(fname, dpi=dpi, bbox_inches="tight")
             plt.close()
             print(f"✅ Saved: {fname}")
