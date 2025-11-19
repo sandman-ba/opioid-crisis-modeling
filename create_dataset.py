@@ -1,13 +1,24 @@
 from pathlib import Path
 from functools import partial
 from argparse import ArgumentParser
-from polars import scan_csv, LazyFrame, Schema, UInt32, UInt16, Float32, col, concat
+from polars import (
+    scan_csv,
+    LazyFrame,
+    Schema,
+    UInt32,
+    UInt16,
+    Float32,
+    col,
+    concat,
+    Expr,
+)
 
 PROCESSED_DATA_PATH: Path = Path("data/Processed")
 MORTALITY_SOURCES: dict[str, Path] = {
     "hepvu": Path("Mortality/HepVu_mortality_rates_final.csv"),
     "cdc-wonder": Path("Mortality/Mortality_final_rates.csv"),
 }
+PRESCRIPTION_SOURCE: Path = Path("Prescriptions/Prescription_dispensing_rates.csv")
 
 
 parser: ArgumentParser = ArgumentParser(
@@ -20,6 +31,13 @@ parser.add_argument(
     default="cdc-wonder",
     choices=list(MORTALITY_SOURCES),
     help="Specify a source for mortality data. Default: %(default)s.",
+)
+
+parser.add_argument(
+    "--save_path",
+    type=Path,
+    default=Path("data/all_data.parquet"),
+    help="Specify a save path for the dataset (will be saved in parquet format). Default: %(default)s.",
 )
 
 
@@ -36,6 +54,28 @@ def _get_years_from_schema(schema: Schema) -> list[int]:
 
 def _compute_id_from_fips(fips: int, year: int) -> int:
     return fips * (10**4) + year
+
+
+def get_id_column(years: list[int]) -> Expr:
+    id_column: Expr = (
+        concat(
+            [
+                col("FIPS").map_elements(partial(_compute_id_from_fips, year=year))
+                for year in years
+            ]
+        )
+        .cast(UInt32)
+        .alias("id")
+    )
+    return id_column
+
+
+def get_fips_column(years: list[int]) -> Expr:
+    return concat([col("FIPS") for year in years]).cast(UInt16).alias("fips")
+
+
+def get_year_column() -> Expr:
+    return (col("id") % (10**4)).cast(UInt16).alias("year")
 
 
 def load_mortality_data(source: str) -> LazyFrame:
@@ -64,33 +104,61 @@ def load_mortality_data(source: str) -> LazyFrame:
     mortality_data: LazyFrame = (
         bad_mortality_data.select(
             [
-                concat(
-                    [
-                        col("FIPS").map_elements(
-                            partial(_compute_id_from_fips, year=year)
-                        )
-                        for year in years
-                    ]
-                )
-                .cast(UInt32)
-                .alias("id"),
-                concat([col("FIPS") for year in years]).cast(UInt16).alias("fips"),
+                get_id_column(years),
+                get_fips_column(years),
                 concat([col(f"{year} MR") for year in years])
                 .cast(Float32)
                 .alias("opioid_related_mortality"),
             ]
         )
-        .with_columns(year=(col("id") % (10**4)).cast(UInt16))
+        .with_columns(get_year_column())
         .select(["id", "fips", "year", "opioid_related_mortality"])
     )
 
     return mortality_data
 
 
+def load_prescription_data() -> LazyFrame:
+    """
+    Function that loads prescription data and returns a lazy frame.
+
+    Returns
+    -------
+    prescription_data : polars.LazyFrame, Schema = {id: int, fips: int, year: int, prescription_rate: float}
+    """
+
+    bad_prescription_data: LazyFrame = scan_csv(
+        PROCESSED_DATA_PATH / PRESCRIPTION_SOURCE
+    )
+    years: list[int] = _get_years_from_schema(bad_prescription_data.collect_schema())
+    prescription_data: LazyFrame = (
+        bad_prescription_data.select(
+            [
+                get_id_column(years),
+                get_fips_column(years),
+                concat([col(f"{year} DR") for year in years])
+                .cast(Float32)
+                .alias("prescription_rate"),
+            ]
+        )
+        .with_columns(get_year_column())
+        .select(["id", "fips", "year", "prescription_rate"])
+    )
+
+    return prescription_data
+
+
 def main() -> None:
     args = parser.parse_args()
     mortality_data = load_mortality_data(args.mortality_source)
+    prescription_data = load_prescription_data()
+    all_data = mortality_data.join(
+        prescription_data.select(["id", "prescription_rate"]), on="id"
+    )
+    all_data.sink_parquet(args.save_path)
     print(mortality_data.head(5).collect())
+    print(prescription_data.head(5).collect())
+    print(all_data.head(5).collect())
 
 
 if __name__ == "__main__":
