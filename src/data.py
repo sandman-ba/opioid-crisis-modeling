@@ -1,77 +1,70 @@
-from typing import Self
+from typing import Self, Sequence, Literal
 from pathlib import Path
 from polars import LazyFrame, scan_parquet, read_parquet_schema
 
+VALID_FEATURES: list[str] = ["unemployment", "prescription_rate"]
+VALID_INTERVENTIONS: list[str] = ["prescription_rate"]
+VALID_PREDICTIONS: list[str] = ["opioid_related_mortality"]
 DATA_PATH: Path = Path("data/all_data.parquet")
 if not DATA_PATH.exists():
-    raise FileNotFoundError(f"{DATA_PATH=} does not exists")
+    raise FileNotFoundError(f"{DATA_PATH} does not exists, run create_dataset.py first")
 
-def get_available_features() -> list[str]:
-    """
-    Helper function that returns a list of available features
-    """
-    available_features: list[str] = list(read_parquet_schema(DATA_PATH))
-    # TODO: Remove unrelated column names
-    return available_features
+type Feature = Literal["unemployment", "prescription_rate"]
+type Intervention = Literal["prescription_rate"]
+type Prediction = Literal["opioid_related_mortality"]
 
-def get_available_predictions() -> list[str]:
+def get_schema() -> list[str]:
     """
-    Helper function that returns a list of available predictions
+    Helper function that returns the schema of the dataset
     """
-    available_predictions: list[str] = list(read_parquet_schema(DATA_PATH))
-    # TODO: Remove unrelated column names
-    return available_predictions
+    schema: list[str] = list(read_parquet_schema(DATA_PATH))
+    return schema
 
-def get_available_interventions() -> list[str]:
-    """
-    Helper function that returns a list of available interventions
-    """
-    available_interventions: list[str] = list(read_parquet_schema(DATA_PATH))
-    # TODO: Remove unrelated column names
-    return available_interventions
+def validate_feature(feature: Feature) -> bool:
+    if feature in VALID_FEATURES:
+        return True
+    else:
+        return False
 
-def check_feature_availability(features: str | list[str]) -> None:
+def validate_features(features: Sequence[Feature]) -> None:
     """
-    Helper function to check if requested features are available
+    Helper function to check if requested features are valid
     """
-    if isinstance(features, str):
-        features = [features]
-
-    available_features = get_available_features()
     invalid_features: list[str] = [
-        feature for feature in features if feature not in available_features
+        feature for feature in features if validate_feature(feature) is False
     ]
 
     if len(invalid_features) > 0:
         raise ValueError(
-            f"Features {(*invalid_features,)} not available. Avaliable choices are:\n{(*available_features,)}"
+            f"Features {(*invalid_features,)} not valid. Valid choices are:\n{(*VALID_FEATURES,)}"
         )
 
-def check_prediction_availability(prediction: str) -> None:
+def validate_prediction(prediction: Prediction) -> None:
     """
-    Helper function to check if requested prediction is available
+    Helper function to check if requested prediction is valid
     """
-    available_predictions = get_available_predictions()
-    if prediction not in available_predictions:
+    if prediction not in VALID_PREDICTIONS:
         raise ValueError(
-            f"Prediction target {prediction} not available. Avaliable choices are:\n{(*available_predictions,)}"
+            f"Prediction target {prediction} not valid. Valid choices are:\n{(*VALID_PREDICTIONS,)}"
         )
 
-def check_intervention_availability(interventions: str | list[str]) -> None:
+def validate_intervention(intervention: Intervention) -> bool:
+    if intervention in VALID_INTERVENTIONS:
+        return True
+    else:
+        return False
+
+def validate_interventions(interventions: Sequence[Intervention]) -> None:
     """
     Helper function to check if requested interventions are available
     """
-    if isinstance(interventions, str):
-        interventions = [interventions]
-
-    available_interventions = get_available_interventions()
     invalid_interventions: list[str] = [
-        intervention for intervention in interventions if intervention not in available_interventions
+        intervention for intervention in interventions if validate_intervention(intervention) is False
     ]
 
     if len(invalid_interventions) > 0:
         raise ValueError(
-            f"Interventions {(*invalid_interventions,)} not available. Avaliable choices are:\n{(*available_interventions,)}"
+            f"Interventions {(*invalid_interventions,)} not valid. Valid choices are:\n{(*VALID_INTERVENTIONS,)}"
         )
 
 
@@ -82,7 +75,7 @@ class Data:
 
     Parameters
     ----------
-    features : list[str], list of features to be used for training a model.
+    fixed_factors : list[str], list of fixed_factors to be used for training a model.
     interventions : list[str], list of interventions to be simulated.
     prediction : str, what the model should predict, default will use the opioid
         related mortality rate.
@@ -90,7 +83,7 @@ class Data:
     Attributes
     ----------
     df : polars.LazyFrame, lazy frame with data.
-    features : list[str], list of features to be used for training a model.
+    fixed_factors : list[str], list of fixed_factors to be used for training a model.
     interventions : list[str], list of interventions to be simulated.
     prediction : str, what the model should predict, default will use the opioid
         related mortality rate.
@@ -102,13 +95,13 @@ class Data:
     Examples
     --------
     Create Data object to train a model to predict opioid related mortality using
-    unemployment and prescription rates as features and implement interventions that
+    unemployment as a fixed_factor and implement interventions that
     regulate prescription rates
 
-    >>> features = ["unemployment", "prescription_rates"]
+    >>> fixed_factors = ["unemployment"]
     >>> interventions = ["prescription_rates"]
     >>> prediction = "opioid_related_mortality_rate"
-    >>> data = Data(features, interventions, prediction)
+    >>> data = Data(fixed_factors, interventions, prediction)
     >>> data.df.collect()
     shape: (X, X)
     ┌─────┬─────┐
@@ -122,34 +115,30 @@ class Data:
     """
 
     df: LazyFrame | None
-    features: list[str]
-    interventions: list[str] | None
-    prediction: str
+    fixed_factors: Sequence[Feature]
+    interventions: Sequence[Intervention] | None
+    prediction: Prediction
 
     def __init__(
         self: Self,
-        features: list[str],
-        interventions: list[str] | None = None,
-        prediction: str | None = None,
+        fixed_factors: Sequence[Feature],
+        interventions: Sequence[Intervention] | None,
+        prediction: Prediction
     ) -> None:
-        if prediction is None:
-            self.prediction = "opioid_related_mortality_rate"
-        else:
-            check_prediction_availability(prediction)
-            self.prediction = prediction
-
-        check_feature_availability(features)
-        self.features = features
-
+        validate_prediction(prediction)
+        validate_features(fixed_factors)
         if interventions is not None:
-            check_intervention_availability(interventions)
+            validate_interventions(interventions)
 
+        self.prediction = prediction
+        self.fixed_factors = fixed_factors
         self.interventions = interventions
 
     def get_data(self: Self) -> LazyFrame:
         if self.df is None:
             data: LazyFrame = scan_parquet(DATA_PATH)
+            features = list(self.fixed_factors) if self.interventions is None else list(self.fixed_factors) + list(self.interventions)
             self.df = data.select(
-                ["fips", "year"] + self.features + [self.prediction]
+                ["fips", "year"] + features + [self.prediction]
             )
         return self.df

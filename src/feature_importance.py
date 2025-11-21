@@ -1,4 +1,4 @@
-from typing import TypeAlias, Any
+from typing import Any
 from dataclasses import dataclass
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import RandomForestRegressor
@@ -12,12 +12,12 @@ from matplotlib.pyplot import Axes
 
 TREE_MODELS: list[str] = ["xgboost", "random_forest"]
 
-Explainer: TypeAlias = TreeExplainer | KernelExplainer
-ShapValues: TypeAlias = Explanation | Cohorts | dict[Any, Explanation]
-Model: TypeAlias = XGBRegressor | RandomForestRegressor | MLPRegressor
-Data: TypeAlias = ndarray | DataFrame
-TwoDArrayLike: TypeAlias = Any
-OneDArrayLike: TypeAlias = Any
+type Explainer = TreeExplainer | KernelExplainer
+type ShapValues = Explanation | Cohorts | dict[Any, Explanation]
+type Model = XGBRegressor | RandomForestRegressor | MLPRegressor
+type Data = ndarray | DataFrame
+type TwoDArrayLike = Any
+type OneDArrayLike = Any
 
 ### TODO: Move this elsewhere
 @dataclass
