@@ -13,6 +13,7 @@ type Feature = Literal["unemployment", "prescription_rate"]
 type Intervention = Literal["prescription_rate"]
 type Prediction = Literal["opioid_related_mortality"]
 
+
 def get_schema() -> list[str]:
     """
     Helper function that returns the schema of the dataset
@@ -20,11 +21,13 @@ def get_schema() -> list[str]:
     schema: list[str] = list(read_parquet_schema(DATA_PATH))
     return schema
 
+
 def validate_feature(feature: Feature) -> bool:
     if feature in VALID_FEATURES:
         return True
     else:
         return False
+
 
 def validate_features(features: Sequence[Feature]) -> None:
     """
@@ -39,6 +42,7 @@ def validate_features(features: Sequence[Feature]) -> None:
             f"Features {(*invalid_features,)} not valid. Valid choices are:\n{(*VALID_FEATURES,)}"
         )
 
+
 def validate_prediction(prediction: Prediction) -> None:
     """
     Helper function to check if requested prediction is valid
@@ -48,24 +52,43 @@ def validate_prediction(prediction: Prediction) -> None:
             f"Prediction target {prediction} not valid. Valid choices are:\n{(*VALID_PREDICTIONS,)}"
         )
 
+
 def validate_intervention(intervention: Intervention) -> bool:
     if intervention in VALID_INTERVENTIONS:
         return True
     else:
         return False
 
+
 def validate_interventions(interventions: Sequence[Intervention]) -> None:
     """
     Helper function to check if requested interventions are available
     """
     invalid_interventions: list[str] = [
-        intervention for intervention in interventions if validate_intervention(intervention) is False
+        intervention
+        for intervention in interventions
+        if validate_intervention(intervention) is False
     ]
 
     if len(invalid_interventions) > 0:
         raise ValueError(
             f"Interventions {(*invalid_interventions,)} not valid. Valid choices are:\n{(*VALID_INTERVENTIONS,)}"
         )
+
+
+def get_data(
+    fixed_factors: Sequence[Feature],
+    interventions: Sequence[Intervention] | None,
+    prediction: Prediction,
+) -> LazyFrame:
+    data: LazyFrame = scan_parquet(DATA_PATH)
+    features = (
+        list(fixed_factors)
+        if interventions is None
+        else list(fixed_factors) + list(interventions)
+    )
+    df = data.select(["id", "fips", "year"] + features + [prediction])
+    return df
 
 
 class Data:
@@ -102,19 +125,23 @@ class Data:
     >>> interventions = ["prescription_rates"]
     >>> prediction = "opioid_related_mortality_rate"
     >>> data = Data(fixed_factors, interventions, prediction)
-    >>> data.df.collect()
-    shape: (X, X)
-    ┌─────┬─────┐
-    │ a   ┆ b   │
-    │ --- ┆ --- │
-    │ i64 ┆ i64 │
-    ╞═════╪═════╡
-    │ 1   ┆ 3   │
-    │ 2   ┆ 4   │
-    └─────┴─────┘
+    >>> data.get_data()
+    >>> data.df.head(5).collect()
+    shape: (5, 5)
+    ┌──────────┬──────┬──────┬───────────────────┬──────────────────────────┐
+    │ id       ┆ fips ┆ year ┆ prescription_rate ┆ opioid_related_mortality │
+    │ ---      ┆ ---  ┆ ---  ┆ ---               ┆ ---                      │
+    │ u32      ┆ u16  ┆ u16  ┆ f32               ┆ f32                      │
+    ╞══════════╪══════╪══════╪═══════════════════╪══════════════════════════╡
+    │ 51172014 ┆ 5117 ┆ 2014 ┆ 91.300003         ┆ 0.0                      │
+    │ 51192014 ┆ 5119 ┆ 2014 ┆ 117.5             ┆ 13.75                    │
+    │ 51232014 ┆ 5123 ┆ 2014 ┆ 96.400002         ┆ 0.0                      │
+    │ 51332014 ┆ 5133 ┆ 2014 ┆ 82.900002         ┆ 0.0                      │
+    │ 51492014 ┆ 5149 ┆ 2014 ┆ 72.300003         ┆ 8.41                     │
+    └──────────┴──────┴──────┴───────────────────┴──────────────────────────┘
     """
 
-    df: LazyFrame | None
+    df: LazyFrame
     fixed_factors: Sequence[Feature]
     interventions: Sequence[Intervention] | None
     prediction: Prediction
@@ -123,7 +150,7 @@ class Data:
         self: Self,
         fixed_factors: Sequence[Feature],
         interventions: Sequence[Intervention] | None,
-        prediction: Prediction
+        prediction: Prediction,
     ) -> None:
         validate_prediction(prediction)
         validate_features(fixed_factors)
@@ -133,12 +160,10 @@ class Data:
         self.prediction = prediction
         self.fixed_factors = fixed_factors
         self.interventions = interventions
+        self.df = get_data(fixed_factors, interventions, prediction)
 
-    def get_data(self: Self) -> LazyFrame:
-        if self.df is None:
-            data: LazyFrame = scan_parquet(DATA_PATH)
-            features = list(self.fixed_factors) if self.interventions is None else list(self.fixed_factors) + list(self.interventions)
-            self.df = data.select(
-                ["fips", "year"] + features + [self.prediction]
-            )
-        return self.df
+    def __repr__(self: Self) -> str:
+        return f"Data(fixed_factors={self.fixed_factors}, interventions={self.interventions}, prediction={self.prediction})"
+
+    def __str__(self: Self) -> str:
+        return f"Data object with attributes\nfixed_factors: {self.fixed_factors}\ninterventions: {self.interventions}\nprediction: {self.prediction}\ndf: {self.df.head(5).collect()}\n\n"

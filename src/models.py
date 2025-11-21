@@ -103,11 +103,11 @@ def get_pretrained_model(model_name: ModelName, config: ModelConfig) -> SKLearnM
 class PredictionModel:
     data: Data
     name: ModelName
-    model: SKLearnModel | None
+    model: SKLearnModel
     explainer: Explainer | None
     results: Results | None
 
-    def __init__(self: Self, context: TaskContext, config: ModelConfig | None) -> None:
+    def __init__(self: Self, context: TaskContext, config: ModelConfig | None = None) -> None:
         self.data = Data(
             fixed_factors=context.fixed_factors,
             interventions=context.interventions,
@@ -119,3 +119,6 @@ class PredictionModel:
         self.model = get_pretrained_model(context.model_name, config)
         self.explainer = None
         self.results = None
+
+    def __str__(self: Self) -> str:
+        return f"PredictionModel object:\n{self.name=}\n{self.model=}\n{self.data=}\n{self.explainer=}\n{self.results=}\n\n"
