@@ -1,17 +1,21 @@
 from dataclasses import dataclass, asdict
-from typing import Any, Literal, Sequence, Self
+from pathlib import Path
+from typing import Any, Literal, Self
 from numpy.typing import NDArray, ArrayLike
+from polars import LazyFrame
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from shap import TreeExplainer, KernelExplainer, Explanation, Cohorts
-from src.data import Data, Feature, Intervention, Prediction
+from src.data import Data
 
-type SKLearnModel = XGBRegressor | RandomForestRegressor | MLPRegressor
+
+type Regressor = XGBRegressor | RandomForestRegressor | MLPRegressor
 type Explainer = TreeExplainer | KernelExplainer
 type ShapValues = Explanation | Cohorts | dict[Any, Explanation]
 type ModelName = Literal["xgboost", "random_forest", "mlp"]
-VALID_MODELS: list[str] = ["xgboost", "random_forest", "mlp"]
+
+VALID_MODELS: list[ModelName] = ["xgboost", "random_forest", "mlp"]
 
 
 @dataclass
@@ -20,14 +24,6 @@ class Results:
     predictions: NDArray
     risk_scores: dict
     shap_values: ShapValues
-
-
-@dataclass
-class TaskContext:
-    fixed_factors: Sequence[Feature]  # TODO: Find better name
-    interventions: Sequence[Intervention] | None = None
-    prediction: Prediction = "opioid_related_mortality"
-    model_name: ModelName = "xgboost"
 
 
 @dataclass
@@ -77,6 +73,7 @@ class MLPConfig:
 
 type ModelConfig = XGBoostConfig | RandomForestConfig | MLPConfig
 
+
 def get_default_config(model_name: ModelName) -> ModelConfig:
     match model_name:
         case "xgboost":
@@ -86,9 +83,12 @@ def get_default_config(model_name: ModelName) -> ModelConfig:
         case "mlp":
             return MLPConfig()
         case _:
-            raise ValueError(f"Model not valid. Please choose from:\n{(*VALID_MODELS,)}")
+            raise ValueError(
+                f"Model not valid. Please choose from:\n{(*VALID_MODELS,)}"
+            )
 
-def get_pretrained_model(model_name: ModelName, config: ModelConfig) -> SKLearnModel:
+
+def initialize_model(model_name: ModelName, config: ModelConfig) -> Regressor:
     match model_name:
         case "xgboost":
             return XGBRegressor(**asdict(config))
@@ -97,28 +97,59 @@ def get_pretrained_model(model_name: ModelName, config: ModelConfig) -> SKLearnM
         case "mlp":
             return MLPRegressor(**asdict(config))
         case _:
-            raise ValueError(f"Model not valid. Please choose from:\n{(*VALID_MODELS,)}")
+            raise ValueError(
+                f"Model not valid. Please choose from:\n{(*VALID_MODELS,)}"
+            )
 
 
 class PredictionModel:
-    data: Data
     name: ModelName
-    model: SKLearnModel
+    model: Regressor
     explainer: Explainer | None
     results: Results | None
 
-    def __init__(self: Self, context: TaskContext, config: ModelConfig | None = None) -> None:
-        self.data = Data(
-            fixed_factors=context.fixed_factors,
-            interventions=context.interventions,
-            prediction=context.prediction,
-        )
-        self.name = context.model_name
+    def __init__(
+        self: Self, name: ModelName, config: ModelConfig | None = None
+    ) -> None:
+        self.name = name
         if config is None:
-            config = get_default_config(context.model_name)
-        self.model = get_pretrained_model(context.model_name, config)
+            config = get_default_config(name)
+        self.model = initialize_model(name, config)
         self.explainer = None
         self.results = None
 
     def __str__(self: Self) -> str:
-        return f"PredictionModel object:\n{self.name=}\n{self.model=}\n{self.data=}\n{self.explainer=}\n{self.results=}\n\n"
+        return f"PredictionModel object:\n{self.name=}\n{self.model=}\n{self.explainer=}\n{self.results=}\n\n"
+
+    def train(
+        self: Self,
+        data: Data,
+        training_year: int,
+        pretrained_model: Path | Regressor | None = None,
+    ) -> None:
+        X: LazyFrame
+        y: LazyFrame
+        X, y = data.get_training_data(training_year)
+        match self.name:
+            case "xgboost":
+                self.model.fit(X, y, xgb_model=pretrained_model)
+            case _:
+                raise NotImplementedError(
+                    f"Training for model {self.name} not yet implemented"
+                )
+
+    def save(self: Self, save_path: Path) -> None:
+        file_name: Path = Path("trained_model.ubj")
+        match self.name:
+            case "xgboost":
+                self.model.save_model(save_path / file_name)
+            case _:
+                raise NotImplementedError(
+                    f"Saving for model {self.name} not yet implemented"
+                )
+
+    def explain(self: Self) -> None:
+        raise NotImplementedError("Method not yet implemented")
+
+    def risk(self: Self) -> None:
+        raise NotImplementedError("Method not yet implemented")

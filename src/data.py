@@ -1,6 +1,6 @@
 from typing import Self, Sequence, Literal
 from pathlib import Path
-from polars import LazyFrame, scan_parquet, read_parquet_schema
+from polars import LazyFrame, scan_parquet, read_parquet_schema, col, concat
 
 VALID_FEATURES: list[str] = ["unemployment", "prescription_rate"]
 VALID_INTERVENTIONS: list[str] = ["prescription_rate"]
@@ -14,25 +14,11 @@ type Intervention = Literal["prescription_rate"]
 type Prediction = Literal["opioid_related_mortality"]
 
 
-def get_schema() -> list[str]:
-    """
-    Helper function that returns the schema of the dataset
-    """
-    schema: list[str] = list(read_parquet_schema(DATA_PATH))
-    return schema
-
-
 def validate_feature(feature: Feature) -> bool:
-    if feature in VALID_FEATURES:
-        return True
-    else:
-        return False
+    return True if feature in VALID_FEATURES else False
 
 
 def validate_features(features: Sequence[Feature]) -> None:
-    """
-    Helper function to check if requested features are valid
-    """
     invalid_features: list[str] = [
         feature for feature in features if validate_feature(feature) is False
     ]
@@ -44,9 +30,6 @@ def validate_features(features: Sequence[Feature]) -> None:
 
 
 def validate_prediction(prediction: Prediction) -> None:
-    """
-    Helper function to check if requested prediction is valid
-    """
     if prediction not in VALID_PREDICTIONS:
         raise ValueError(
             f"Prediction target {prediction} not valid. Valid choices are:\n{(*VALID_PREDICTIONS,)}"
@@ -54,16 +37,10 @@ def validate_prediction(prediction: Prediction) -> None:
 
 
 def validate_intervention(intervention: Intervention) -> bool:
-    if intervention in VALID_INTERVENTIONS:
-        return True
-    else:
-        return False
+    return True if intervention in VALID_INTERVENTIONS else False
 
 
 def validate_interventions(interventions: Sequence[Intervention]) -> None:
-    """
-    Helper function to check if requested interventions are available
-    """
     invalid_interventions: list[str] = [
         intervention
         for intervention in interventions
@@ -74,6 +51,10 @@ def validate_interventions(interventions: Sequence[Intervention]) -> None:
         raise ValueError(
             f"Interventions {(*invalid_interventions,)} not valid. Valid choices are:\n{(*VALID_INTERVENTIONS,)}"
         )
+
+
+def get_schema() -> list[str]:
+    return list(read_parquet_schema(DATA_PATH))
 
 
 def get_data(
@@ -87,8 +68,8 @@ def get_data(
         if interventions is None
         else list(fixed_factors) + list(interventions)
     )
-    df = data.select(["id", "fips", "year"] + features + [prediction])
-    return df
+    lazy_frame = data.select(["id", "fips", "year"] + features + [prediction])
+    return lazy_frame
 
 
 class Data:
@@ -105,7 +86,7 @@ class Data:
 
     Attributes
     ----------
-    df : polars.LazyFrame, lazy frame with data.
+    lazy_frame : polars.LazyFrame, lazy frame with data.
     fixed_factors : list[str], list of fixed_factors to be used for training a model.
     interventions : list[str], list of interventions to be simulated.
     prediction : str, what the model should predict, default will use the opioid
@@ -113,7 +94,7 @@ class Data:
 
     Methods
     -------
-    load_data() -> polars.LazyFrame : Loads dataset if not loaded yet and returns self.df.
+    get_training_years() -> polars.LazyFrame : Returns lazy frame with one column named "year" listing the years that have data available for training a model.
 
     Examples
     --------
@@ -126,7 +107,7 @@ class Data:
     >>> prediction = "opioid_related_mortality_rate"
     >>> data = Data(fixed_factors, interventions, prediction)
     >>> data.get_data()
-    >>> data.df.head(5).collect()
+    >>> data.lazy_frame.head(5).collect()
     shape: (5, 5)
     ┌──────────┬──────┬──────┬───────────────────┬──────────────────────────┐
     │ id       ┆ fips ┆ year ┆ prescription_rate ┆ opioid_related_mortality │
@@ -141,7 +122,7 @@ class Data:
     └──────────┴──────┴──────┴───────────────────┴──────────────────────────┘
     """
 
-    df: LazyFrame
+    lazy_frame: LazyFrame
     fixed_factors: Sequence[Feature]
     interventions: Sequence[Intervention] | None
     prediction: Prediction
@@ -149,21 +130,69 @@ class Data:
     def __init__(
         self: Self,
         fixed_factors: Sequence[Feature],
-        interventions: Sequence[Intervention] | None,
-        prediction: Prediction,
+        interventions: Sequence[Intervention] | None = None,
+        prediction: Prediction | None = None,
     ) -> None:
-        validate_prediction(prediction)
         validate_features(fixed_factors)
+        self.fixed_factors = fixed_factors
+
+        if prediction is None:
+            self.prediction = "opioid_related_mortality"
+        else:
+            validate_prediction(prediction)
+            self.prediction = prediction
+
         if interventions is not None:
             validate_interventions(interventions)
 
-        self.prediction = prediction
-        self.fixed_factors = fixed_factors
         self.interventions = interventions
-        self.df = get_data(fixed_factors, interventions, prediction)
+        self.lazy_frame = get_data(fixed_factors, interventions, self.prediction)
 
     def __repr__(self: Self) -> str:
         return f"Data(fixed_factors={self.fixed_factors}, interventions={self.interventions}, prediction={self.prediction})"
 
     def __str__(self: Self) -> str:
-        return f"Data object with attributes\nfixed_factors: {self.fixed_factors}\ninterventions: {self.interventions}\nprediction: {self.prediction}\ndf: {self.df.head(5).collect()}\n\n"
+        return f"Data object with attributes\nfixed_factors: {self.fixed_factors}\ninterventions: {self.interventions}\nprediction: {self.prediction}\nlazy_frame: {self.lazy_frame.head(5).collect()}\n\n"
+
+    def get_training_years(self: Self) -> LazyFrame:
+        return self.lazy_frame.select("year").unique().sort("year").head(-1)
+
+    def get_fixed_factors(self: Self, training_year: int) -> LazyFrame:
+        return (
+            self.lazy_frame.filter(col("year") == training_year)
+            .sort("fips")
+            .select(self.fixed_factors)
+        )
+
+    def get_interventions(self: Self, training_year: int) -> LazyFrame | None:
+        if self.interventions is None:
+            return None
+        return (
+            self.lazy_frame.filter(col("year") == training_year)
+            .sort("fips")
+            .select(self.interventions)
+        )
+
+    def get_prediction(self: Self, training_year: int) -> LazyFrame:
+        return (
+            self.lazy_frame.filter(col("year") == training_year + 1)
+            .sort("fips")
+            .select(self.prediction)
+        )
+
+    def get_training_data(
+        self: Self, training_year: int
+    ) -> tuple[LazyFrame, LazyFrame]:
+        features: LazyFrame
+        if self.interventions is None:
+            features = self.get_fixed_factors(training_year)
+        else:
+            features = concat(
+                [
+                    self.get_fixed_factors(training_year),
+                    self.get_interventions(training_year),
+                ],
+                how="horizontal",
+            )  # type: ignore[type-var, assignment]
+        prediction: LazyFrame = self.get_prediction(training_year)
+        return features, prediction
