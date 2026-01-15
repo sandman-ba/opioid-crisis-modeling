@@ -20,10 +20,10 @@ VALID_MODELS: list[ModelName] = ["xgboost", "random_forest", "mlp"]
 
 @dataclass
 class Results:
-    metrics: dict
-    predictions: NDArray
-    risk_scores: dict
-    shap_values: ShapValues
+    metrics: dict | None = None
+    predictions: NDArray | None = None
+    risk_scores: dict | None = None
+    shap_values: ShapValues | None = None
 
 
 @dataclass
@@ -36,6 +36,7 @@ class XGBoostConfig:
     subsample: float = 0.8
     colsample_bytree: float = 0.8
     random_state: int = 42
+    eval_metric: str | list[str] | None = "rmse"
 
 
 @dataclass
@@ -115,8 +116,8 @@ class PredictionModel:
         if config is None:
             config = get_default_config(name)
         self.model = initialize_model(name, config)
+        self.results = Results()
         self.explainer = None
-        self.results = None
 
     def __str__(self: Self) -> str:
         return f"PredictionModel object:\n{self.name=}\n{self.model=}\n{self.explainer=}\n{self.results=}\n\n"
@@ -132,7 +133,8 @@ class PredictionModel:
         X, y = data.get_training_data(training_year)
         match self.name:
             case "xgboost":
-                self.model.fit(X, y, xgb_model=pretrained_model)
+                self.model.fit(X, y, xgb_model=pretrained_model, eval_set=[(X,y)], verbose=False)
+                self.results.metrics = self.model.evals_result()['validation_0']
             case _:
                 raise NotImplementedError(
                     f"Training for model {self.name} not yet implemented"
@@ -152,4 +154,5 @@ class PredictionModel:
         raise NotImplementedError("Method not yet implemented")
 
     def risk(self: Self) -> None:
+        # self.results.predictions = self.model.predict()
         raise NotImplementedError("Method not yet implemented")

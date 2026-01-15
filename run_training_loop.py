@@ -1,4 +1,4 @@
-from src.models import PredictionModel, ModelName
+from src.models import PredictionModel, ModelName, XGBoostConfig
 from src.data import Data, Feature
 
 
@@ -15,11 +15,14 @@ def train_loop(data: Data, prediction_model: PredictionModel) -> None:
 
 def main() -> None:
     fixed_factors: list[Feature] = ["prescription_rate"]
-    model_name: ModelName = "mlp"
+    model_name: ModelName = "xgboost"
+    model_config: XGBoostConfig = XGBoostConfig(eval_metric=["rmse", "mae"])
     data = Data(fixed_factors)
-    prediction_model = PredictionModel(model_name)
+    prediction_model = PredictionModel(model_name, model_config)
     print(prediction_model)
     print(data)
+    prediction_model.train(data, 2019)
+    print(prediction_model.results.metrics)
 
 
 if __name__ == "__main__":
